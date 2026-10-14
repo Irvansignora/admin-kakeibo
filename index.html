@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https: http://localhost:* http://127.0.0.1:*; base-uri 'none'; form-action 'none'">
+<title>Kakeibo Admin</title>
+<style>
+  :root{--bg:#ece3ce;--card:#fbf7ea;--ink:#2a251d;--mute:#7c8ba3;--line:#c8bd9c;--red:#ac3527;--navy:#17233d;--amber:#d9822f;--green:#2f7d4f}
+  @media (prefers-color-scheme:dark){:root{--bg:#121a2e;--card:#1b2744;--ink:#f1ead8;--mute:#a9b4c8;--line:#33446b}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:10px;padding:14px 18px;background:var(--navy);color:#fff}
+  header h1{font-size:17px;margin:0;flex:1}
+  main{max-width:900px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  input,select,button{font:inherit;color:inherit}
+  input,select{background:transparent;border:1px solid var(--line);border-radius:9px;padding:8px 10px;min-width:0}
+  button{border:0;border-radius:9px;padding:8px 14px;font-weight:700;cursor:pointer;background:var(--red);color:#fff}
+  button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  button.ok{background:var(--green)}
+  button:disabled{opacity:.5;cursor:default}
+  label{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .grow{flex:1;min-width:140px}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center}
+  .stat b{display:block;font-size:22px}.stat span{font-size:11.5px;color:var(--mute)}
+  .tabs{display:flex;gap:6px;margin-bottom:12px}
+  .tabs button{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .tabs button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .badge{display:inline-block;border-radius:99px;padding:2px 9px;font-size:11.5px;font-weight:700;background:var(--line);color:var(--ink);margin-right:4px}
+  .badge.premium{background:#3b6ea5;color:#fff}.badge.plus{background:var(--amber);color:#2a251d}
+  .badge.warn{background:#f4d9a8;color:#7a4a00}.badge.pend{background:var(--red);color:#fff}
+  .name{font-weight:700}.mail{color:var(--mute);font-size:12.5px;word-break:break-all}
+  .item{border-top:1px solid var(--line);padding:12px 0}.item:first-child{border-top:0}
+  .meta{margin:4px 0 8px}
+  .msg{padding:9px 12px;border-radius:10px;margin-bottom:10px;background:#f4d9d5;color:#7a1f14}
+  .msg.good{background:#d6ecdc;color:#1c5a35}
+  .empty{color:var(--mute);text-align:center;padding:20px}
+  @media(max-width:560px){.stats{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<header><h1>Kakeibo Admin</h1><button class="ghost" id="out" style="display:none;color:#fff;border-color:#ffffff66">Keluar</button></header>
+<main id="app"></main>
+<script>
+"use strict";
+var KEY_STORE = "kk_admin_key", BASE_STORE = "kk_admin_base";
+var S = { base: localStorage.getItem(BASE_STORE) || "https://chat.iranza.com", key: sessionStorage.getItem(KEY_STORE) || "", tab: "req", users: [], more: false, stats: null, reqs: [], q: "", f: "all", off: 0 };
+var LABEL = { free: "Gratis", premium: "Premium", plus: "Premium+" };
+var $ = function (s) { return document.querySelector(s); };
+
+function el(tag, props) {
+  var e = document.createElement(tag), i, k, c;
+  for (k in (props || {})) {
+    if (k === "class") e.className = props[k];
+    else if (k.indexOf("on") === 0) e.addEventListener(k.slice(2), props[k]);
+    else e.setAttribute(k, props[k]);
+  }
+  for (i = 2; i < arguments.length; i++) { c = arguments[i]; if (c == null || c === false) continue; e.append(c.nodeType ? c : document.createTextNode(String(c))); }
+  return e;
+}
+function fmtDate(ts) { return new Date(ts).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }); }
+function fmtTime(ts) { return new Date(ts).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
+function daysLeft(ts) { return Math.ceil((ts - Date.now()) / 864e5); }
+
+function flash(text, good) {
+  var old = $("#flash"); if (old) old.remove();
+  var m = el("div", { id: "flash", class: "msg" + (good ? " good" : "") }, text);
+  var app = $("#app"); app.insertBefore(m, app.firstChild);
+  setTimeout(function () { if (m.parentNode) m.remove(); }, 4500);
+}
+
+function call(path, method, body) {
+  return fetch(S.base + path, { method: method || "GET", headers: { "x-admin-key": S.key, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined, cache: "no-store" })
+    .catch(function () { throw { msg: "Tidak bisa terhubung ke server. Cek alamat API dan ALLOWED_ORIGIN di worker." }; })
+    .then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (r.status === 401) { logout(); throw { msg: "Admin key salah." }; }
+        if (r.status === 429) throw { msg: "Terlalu banyak percobaan salah. Coba lagi sekitar 1 jam." };
+        if (r.status === 404) throw { msg: "Endpoint admin tidak ditemukan. Pastikan worker versi terbaru sudah di-deploy dan ADMIN_KEY sudah diisi." };
+        if (!r.ok) throw { msg: "Server error (" + r.status + ")." };
+        return j;
+      });
+    });
+}
+
+function logout() { S.key = ""; sessionStorage.removeItem(KEY_STORE); draw(); }
+function validBase(b) { return /^https:\/\/[^\s/]+$/.test(b) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(b); }
+
+function drawLogin(err) {
+  var app = $("#app"); app.textContent = ""; $("#out").style.display = "none";
+  var base = el("input", { id: "base", class: "grow", value: S.base, autocomplete: "off", spellcheck: "false" });
+  var key = el("input", { id: "key", type: "password", class: "grow", autocomplete: "off", placeholder: "ADMIN_KEY" });
+  var go = el("button", { id: "go" }, "Masuk");
+  function submit() {
+    var b = base.value.trim().replace(/\/+$/, "");
+    if (!validBase(b)) return flash("Alamat API harus https://... (atau http://localhost).");
+    if (!key.value) return flash("Isi admin key.");
+    S.base = b; S.key = key.value; localStorage.setItem(BASE_STORE, b);
+    go.disabled = true;
+    call("/api/admin/users?limit=1").then(function () { sessionStorage.setItem(KEY_STORE, S.key); S.tab = "req"; refreshAll(); })
+      .catch(function (e) { go.disabled = false; S.key = ""; drawLogin(e.msg); });
+  }
+  go.addEventListener("click", submit);
+  key.addEventListener("keydown", function (e) { if (e.key === "Enter") submit(); });
+  app.append(
+    el("div", { class: "card" },
+      err ? el("div", { class: "msg" }, err) : null,
+      el("label", null, "Alamat API (worker)"), el("div", { class: "row" }, base),
+      el("label", null, "Admin key (disimpan hanya selama tab ini terbuka)"), el("div", { class: "row" }, key),
+      el("div", { class: "row", style: "margin-top:14px" }, go))
+  );
+}
+
+function badge(plan) { return el("span", { class: "badge " + plan }, LABEL[plan] || plan); }
+
+function userRow(u) {
+  var plan = el("select", null, el("option", { value: "premium" }, "Premium"), el("option", { value: "plus" }, "Premium+"), el("option", { value: "free" }, "Cabut (Gratis)"));
+  plan.value = u.pending || (u.plan === "free" ? "premium" : u.plan);
+  var dur = el("select", null, el("option", { value: "30" }, "30 hari"), el("option", { value: "90" }, "90 hari"), el("option", { value: "180" }, "180 hari"), el("option", { value: "365" }, "365 hari"), el("option", { value: "0" }, "Tanpa batas"));
+  var apply = el("button", null, "Terapkan");
+  apply.addEventListener("click", function () {
+    var p = plan.value, d = parseInt(dur.value, 10), what = p === "free" ? "Cabut paket" : LABEL[p] + " " + (d ? d + " hari" : "tanpa batas");
+    if (!confirm(what + " untuk " + u.email + "?")) return;
+    apply.disabled = true;
+    setPlan(u.id, p, d);
+  });
+  var info = el("div", { class: "meta" }, badge(u.plan));
+  if (u.pending) info.append(el("span", { class: "badge pend" }, "Minta " + LABEL[u.pending]));
+  if (u.plan !== "free") {
+    info.append(u.until ? "sampai " + fmtDate(u.until) : "tanpa batas");
+    if (u.until && daysLeft(u.until) <= 7) info.append(" ", el("span", { class: "badge warn" }, "habis " + Math.max(daysLeft(u.until), 0) + " hari lagi"));
+  }
+  return el("div", { class: "item" },
+    el("div", { class: "name" }, u.name || "(tanpa nama)"), el("div", { class: "mail" }, u.email), info,
+    el("div", { class: "row" }, plan, dur, apply));
+}
+
+function reqRow(r) {
+  var dur = el("select", null, el("option", { value: "30" }, "30 hari"), el("option", { value: "90" }, "90 hari"), el("option", { value: "180" }, "180 hari"), el("option", { value: "365" }, "365 hari"), el("option", { value: "0" }, "Tanpa batas"));
+  var yes = el("button", { class: "ok" }, "Setujui " + LABEL[r.plan]), no = el("button", { class: "ghost" }, "Tolak");
+  yes.addEventListener("click", function () {
+    var d = parseInt(dur.value, 10);
+    if (!confirm("Setujui " + LABEL[r.plan] + " " + (d ? d + " hari" : "tanpa batas") + " untuk " + r.user.email + "?")) return;
+    yes.disabled = no.disabled = true; setPlan(r.user.id, r.plan, d);
+  });
+  no.addEventListener("click", function () {
+    if (!confirm("Tolak permintaan " + r.user.email + "?")) return;
+    yes.disabled = no.disabled = true;
+    call("/api/admin/reject", "POST", { id: r.id }).then(function () { flash("Permintaan ditolak.", true); refreshAll(); }).catch(function (e) { yes.disabled = no.disabled = false; flash(e.msg); });
+  });
+  return el("div", { class: "item" },
+    el("div", { class: "name" }, r.user.name || "(tanpa nama)"), el("div", { class: "mail" }, r.user.email),
+    el("div", { class: "meta" }, el("span", { class: "badge pend" }, "Minta " + LABEL[r.plan]), "sekarang ", badge(r.user.plan), " · " + fmtTime(r.created)),
+    el("div", { class: "row" }, dur, yes, no));
+}
+
+function setPlan(id, plan, days) {
+  call("/api/admin/plan", "POST", { user_id: id, plan: plan, days: days })
+    .then(function (j) { flash(j.ok ? "Paket diperbarui." : "Pengguna tidak ditemukan.", j.ok); refreshAll(); })
+    .catch(function (e) { flash(e.msg); refreshAll(); });
+}
+
+function loadUsers(append) {
+  if (!append) S.off = 0;
+  var qs = "?limit=50&offset=" + S.off + "&plan=" + encodeURIComponent(S.f) + (S.q ? "&q=" + encodeURIComponent(S.q) : "");
+  return call("/api/admin/users" + qs).then(function (j) {
+    S.users = append ? S.users.concat(j.users) : j.users; S.more = j.more; S.stats = j.stats;
+  });
+}
+function refreshAll() {
+  Promise.all([loadUsers(false), call("/api/admin/requests").then(function (j) { S.reqs = j.requests; })])
+    .then(draw).catch(function (e) { flash(e.msg); });
+}
+
+var tmr;
+function draw() {
+  if (!S.key) return drawLogin();
+  var app = $("#app"), keep = $("#flash"); app.textContent = ""; if (keep) app.append(keep);
+  $("#out").style.display = "";
+  var st = S.stats || { total: 0, premium: 0, plus: 0, pending: 0 };
+  app.append(el("div", { class: "stats" },
+    el("div", { class: "stat" }, el("b", null, st.total), el("span", null, "Pengguna")),
+    el("div", { class: "stat" }, el("b", null, st.premium), el("span", null, "Premium aktif")),
+    el("div", { class: "stat" }, el("b", null, st.plus), el("span", null, "Premium+ aktif")),
+    el("div", { class: "stat" }, el("b", null, st.pending), el("span", null, "Menunggu"))));
+  var t1 = el("button", { class: S.tab === "req" ? "on" : "" }, "Permintaan (" + S.reqs.length + ")"), t2 = el("button", { class: S.tab === "usr" ? "on" : "" }, "Pengguna");
+  t1.addEventListener("click", function () { S.tab = "req"; draw(); }); t2.addEventListener("click", function () { S.tab = "usr"; draw(); });
+  app.append(el("div", { class: "tabs" }, t1, t2));
+  var card = el("div", { class: "card" });
+  if (S.tab === "req") {
+    if (!S.reqs.length) card.append(el("div", { class: "empty" }, "Belum ada permintaan upgrade."));
+    S.reqs.forEach(function (r) { card.append(reqRow(r)); });
+  } else {
+    var q = el("input", { class: "grow", placeholder: "Cari nama atau email", value: S.q }), f = el("select", null,
+      el("option", { value: "all" }, "Semua"), el("option", { value: "premium" }, "Premium"), el("option", { value: "plus" }, "Premium+"),
+      el("option", { value: "expiring" }, "Segera habis (7 hari)"), el("option", { value: "pending" }, "Menunggu persetujuan"), el("option", { value: "free" }, "Gratis"));
+    f.value = S.f;
+    q.addEventListener("input", function () { clearTimeout(tmr); tmr = setTimeout(function () { S.q = q.value.trim(); loadUsers(false).then(function () { draw(); var n = $(".grow"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }).catch(function (e) { flash(e.msg); }); }, 350); });
+    f.addEventListener("change", function () { S.f = f.value; loadUsers(false).then(draw).catch(function (e) { flash(e.msg); }); });
+    card.append(el("div", { class: "row" }, q, f));
+    if (!S.users.length) card.append(el("div", { class: "empty" }, "Tidak ada pengguna."));
+    S.users.forEach(function (u) { card.append(userRow(u)); });
+    if (S.more) { var m = el("button", { class: "ghost", style: "margin-top:10px" }, "Muat lagi"); m.addEventListener("click", function () { S.off += 50; loadUsers(true).then(draw).catch(function (e) { flash(e.msg); }); }); card.append(m); }
+  }
+  app.append(card);
+  app.append(el("button", { class: "ghost", onclick: refreshAll }, "Segarkan"));
+}
+
+$("#out").addEventListener("click", logout);
+if (S.key) refreshAll(); else drawLogin();
+</script>
+</body>
+</html>
