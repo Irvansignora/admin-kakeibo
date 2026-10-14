@@ -39,6 +39,8 @@
   .msg{padding:9px 12px;border-radius:10px;margin-bottom:10px;background:#f4d9d5;color:#7a1f14}
   .msg.good{background:#d6ecdc;color:#1c5a35}
   .empty{color:var(--mute);text-align:center;padding:20px}
+  pre.json{white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto;background:rgba(0,0,0,.06);border-radius:10px;padding:10px;font:12px/1.5 ui-monospace,Consolas,monospace;margin:8px 0 0}
+  .key{font:600 12.5px ui-monospace,Consolas,monospace;word-break:break-all}
   @media(max-width:560px){.stats{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
@@ -48,7 +50,7 @@
 <script>
 "use strict";
 var KEY_STORE = "kk_admin_key", BASE_STORE = "kk_admin_base";
-var S = { base: localStorage.getItem(BASE_STORE) || "https://chat.iranza.com", key: sessionStorage.getItem(KEY_STORE) || "", tab: "req", users: [], more: false, stats: null, reqs: [], q: "", f: "all", off: 0 };
+var S = { base: localStorage.getItem(BASE_STORE) || "https://chat.iranza.com", key: sessionStorage.getItem(KEY_STORE) || "", tab: "req", users: [], more: false, stats: null, reqs: [], q: "", f: "all", off: 0, mat: [], matPre: "", matView: null };
 var LABEL = { free: "Gratis", premium: "Premium", plus: "Premium+" };
 var $ = function (s) { return document.querySelector(s); };
 
@@ -176,6 +178,23 @@ function refreshAll() {
     .then(draw).catch(function (e) { flash(e.msg); });
 }
 
+function loadMat() {
+  return call("/api/admin/study?prefix=" + encodeURIComponent(S.matPre)).then(function (j) { S.mat = j.items; });
+}
+function matRow(m) {
+  var view = el("button", { class: "ghost" }, "Lihat"), del = el("button", null, "Hapus");
+  view.addEventListener("click", function () {
+    call("/api/admin/study/item?key=" + encodeURIComponent(m.key)).then(function (j) { S.matView = { key: m.key, text: JSON.stringify(j.data, null, 2) }; draw(); }).catch(function (e) { flash(e.msg); });
+  });
+  del.addEventListener("click", function () {
+    if (!confirm("Hapus materi ini? Materi akan dibuat ulang oleh AI saat ada pengguna yang membukanya.\n" + m.key)) return;
+    del.disabled = true;
+    call("/api/admin/study/delete", "POST", { key: m.key }).then(function () { if (S.matView && S.matView.key === m.key) S.matView = null; flash("Materi dihapus.", true); return loadMat(); }).then(draw).catch(function (e) { del.disabled = false; flash(e.msg); });
+  });
+  var shown = S.matView && S.matView.key === m.key;
+  return el("div", { class: "item" }, el("div", { class: "key" }, m.key), el("div", { class: "meta" }, fmtDate(m.created) + " · " + Math.round(m.size / 100) / 10 + " KB"), el("div", { class: "row" }, view, del), shown ? el("pre", { class: "json" }, S.matView.text) : null);
+}
+
 var tmr;
 function draw() {
   if (!S.key) return drawLogin();
@@ -187,13 +206,29 @@ function draw() {
     el("div", { class: "stat" }, el("b", null, st.premium), el("span", null, "Premium aktif")),
     el("div", { class: "stat" }, el("b", null, st.plus), el("span", null, "Premium+ aktif")),
     el("div", { class: "stat" }, el("b", null, st.pending), el("span", null, "Menunggu"))));
-  var t1 = el("button", { class: S.tab === "req" ? "on" : "" }, "Permintaan (" + S.reqs.length + ")"), t2 = el("button", { class: S.tab === "usr" ? "on" : "" }, "Pengguna");
+  var t1 = el("button", { class: S.tab === "req" ? "on" : "" }, "Permintaan (" + S.reqs.length + ")"), t2 = el("button", { class: S.tab === "usr" ? "on" : "" }, "Pengguna"), t3 = el("button", { class: S.tab === "mat" ? "on" : "" }, "Materi");
   t1.addEventListener("click", function () { S.tab = "req"; draw(); }); t2.addEventListener("click", function () { S.tab = "usr"; draw(); });
-  app.append(el("div", { class: "tabs" }, t1, t2));
+  t3.addEventListener("click", function () { S.tab = "mat"; loadMat().then(draw).catch(function (e) { flash(e.msg); }); });
+  app.append(el("div", { class: "tabs" }, t1, t2, t3));
   var card = el("div", { class: "card" });
   if (S.tab === "req") {
     if (!S.reqs.length) card.append(el("div", { class: "empty" }, "Belum ada permintaan upgrade."));
     S.reqs.forEach(function (r) { card.append(reqRow(r)); });
+  } else if (S.tab === "mat") {
+    var pre = el("input", { class: "grow", placeholder: "Awalan kunci, mis. content|g_te_iru atau quiz|", value: S.matPre, autocomplete: "off", spellcheck: "false" });
+    var find = el("button", null, "Cari"), delAll = el("button", { class: "ghost" }, "Hapus semua yang cocok");
+    find.addEventListener("click", function () { S.matPre = pre.value.trim(); S.matView = null; loadMat().then(draw).catch(function (e) { flash(e.msg); }); });
+    pre.addEventListener("keydown", function (e) { if (e.key === "Enter") find.click(); });
+    delAll.addEventListener("click", function () {
+      var p = pre.value.trim();
+      if (p.length < 6) return flash("Awalan minimal 6 karakter supaya tidak menghapus terlalu banyak.");
+      if (!confirm("Hapus SEMUA materi berawalan \"" + p + "\" (" + S.mat.length + " tampil)? Materi dibuat ulang oleh AI saat dibuka pengguna.")) return;
+      call("/api/admin/study/delete", "POST", { prefix: p }).then(function (j) { S.matPre = p; S.matView = null; flash(j.deleted + " materi dihapus.", true); return loadMat(); }).then(draw).catch(function (e) { flash(e.msg); });
+    });
+    card.append(el("div", { class: "row" }, pre, find, delAll),
+      el("div", { class: "meta", style: "margin-top:8px" }, "Format kunci: jenis|topik|bahasa|set. Jenis: content atau quiz. Contoh: content|g_te_iru|id|0"));
+    if (!S.mat.length) card.append(el("div", { class: "empty" }, "Belum ada materi tersimpan (atau tidak ada yang cocok)."));
+    S.mat.forEach(function (m) { card.append(matRow(m)); });
   } else {
     var q = el("input", { class: "grow", placeholder: "Cari nama atau email", value: S.q }), f = el("select", null,
       el("option", { value: "all" }, "Semua"), el("option", { value: "premium" }, "Premium"), el("option", { value: "plus" }, "Premium+"),
