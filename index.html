@@ -41,7 +41,17 @@
   .empty{color:var(--mute);text-align:center;padding:20px}
   pre.json{white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto;background:rgba(0,0,0,.06);border-radius:10px;padding:10px;font:12px/1.5 ui-monospace,Consolas,monospace;margin:8px 0 0}
   .key{font:600 12.5px ui-monospace,Consolas,monospace;word-break:break-all}
-  @media(max-width:560px){.stats{grid-template-columns:repeat(2,1fr)}}
+  .chart{display:flex;align-items:flex-end;gap:3px;height:120px;padding:6px 0;border-bottom:1px solid var(--line)}
+  .chart div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:1px;min-width:0}
+  .chart i{display:block;background:var(--navy);border-radius:3px 3px 0 0;min-height:1px}.chart i.n{background:var(--amber);border-radius:0}
+  .axis{display:flex;justify-content:space-between;font-size:11px;color:var(--mute);margin-top:4px}
+  .legend{font-size:12px;color:var(--mute);margin:6px 0 0}.legend b{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 10px;vertical-align:-1px}
+  .bar{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:13px}.bar span{width:120px;flex:0 0 120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bar em{flex:1;height:10px;border-radius:5px;background:rgba(0,0,0,.08);overflow:hidden;font-style:normal}.bar em i{display:block;height:100%;background:var(--red)}.bar b{width:36px;text-align:right}
+  h3{font-size:14px;margin:4px 0 8px}.two{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .act{font-size:12px;color:var(--mute);margin-top:2px}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:0}
+  .raw{white-space:pre-wrap;font-size:12.5px;background:rgba(0,0,0,.05);border-radius:9px;padding:8px;margin:6px 0;max-height:160px;overflow:auto}
+  @media(max-width:560px){.stats{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -50,8 +60,16 @@
 <script>
 "use strict";
 var KEY_STORE = "kk_admin_key", BASE_STORE = "kk_admin_base";
-var S = { base: localStorage.getItem(BASE_STORE) || "https://chat.iranza.com", key: sessionStorage.getItem(KEY_STORE) || "", tab: "req", users: [], more: false, stats: null, reqs: [], q: "", f: "all", off: 0, mat: [], matPre: "", matView: null };
+var S = { an: null, jobs: [], srcs: [], jobSt: "pending", sort: "created", base: localStorage.getItem(BASE_STORE) || "https://chat.iranza.com", key: sessionStorage.getItem(KEY_STORE) || "", tab: "dash", users: [], more: false, stats: null, reqs: [], q: "", f: "all", off: 0, mat: [], matPre: "", matView: null };
 var LABEL = { free: "Gratis", premium: "Premium", plus: "Premium+" };
+var LANGN = { id: "Indonesia", en: "English", my: "Myanmar", bn: "Bangla", vi: "Vietnam", th: "Thai", ja: "日本語", zh: "中文", ko: "한국어" };
+function ago(ts) {
+  if (!ts) return "belum pernah";
+  var m = Math.floor((Date.now() - ts) / 6e4);
+  if (m < 2) return "baru saja"; if (m < 60) return m + " menit lalu"; if (m < 1440) return Math.floor(m / 60) + " jam lalu";
+  var d = Math.floor(m / 1440); return d < 60 ? d + " hari lalu" : fmtDate(ts);
+}
+function actColor(ts) { var d = ts ? (Date.now() - ts) / 864e5 : 999; return d <= 1 ? "var(--green)" : d <= 7 ? "var(--amber)" : d <= 30 ? "var(--mute)" : "var(--red)"; }
 var $ = function (s) { return document.querySelector(s); };
 
 function el(tag, props) {
@@ -61,7 +79,8 @@ function el(tag, props) {
     else if (k.indexOf("on") === 0) e.addEventListener(k.slice(2), props[k]);
     else e.setAttribute(k, props[k]);
   }
-  for (i = 2; i < arguments.length; i++) { c = arguments[i]; if (c == null || c === false) continue; e.append(c.nodeType ? c : document.createTextNode(String(c))); }
+  var add = function (c) { if (c == null || c === false) return; if (Array.isArray(c)) return c.forEach(add); e.append(c.nodeType ? c : document.createTextNode(String(c))); };
+  for (i = 2; i < arguments.length; i++) add(arguments[i]);
   return e;
 }
 function fmtDate(ts) { return new Date(ts).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }); }
@@ -103,7 +122,7 @@ function drawLogin(err) {
     if (!key.value) return flash("Isi admin key.");
     S.base = b; S.key = key.value; localStorage.setItem(BASE_STORE, b);
     go.disabled = true;
-    call("/api/admin/users?limit=1").then(function () { sessionStorage.setItem(KEY_STORE, S.key); S.tab = "req"; refreshAll(); })
+    call("/api/admin/users?limit=1").then(function () { sessionStorage.setItem(KEY_STORE, S.key); S.tab = "dash"; refreshAll(); })
       .catch(function (e) { go.disabled = false; S.key = ""; drawLogin(e.msg); });
   }
   go.addEventListener("click", submit);
@@ -136,8 +155,11 @@ function userRow(u) {
     info.append(u.until ? "sampai " + fmtDate(u.until) : "tanpa batas");
     if (u.until && daysLeft(u.until) <= 7) info.append(" ", el("span", { class: "badge warn" }, "habis " + Math.max(daysLeft(u.until), 0) + " hari lagi"));
   }
+  var act = el("div", { class: "act" }, el("span", { class: "dot", style: "background:" + actColor(u.seen) }),
+    "Aktif terakhir " + ago(u.seen) + (u.opens ? " · " + u.opens + "× buka app" : "") + (u.platform ? " · " + u.platform : "") +
+    " · " + (LANGN[u.lang] || u.lang || "-") + (u.created ? " · daftar " + fmtDate(u.created) : "") + (u.ver ? " · v" + u.ver : ""));
   return el("div", { class: "item" },
-    el("div", { class: "name" }, u.name || "(tanpa nama)"), el("div", { class: "mail" }, u.email), info,
+    el("div", { class: "name" }, u.name || "(tanpa nama)"), el("div", { class: "mail" }, u.email), act, info,
     el("div", { class: "row" }, plan, dur, apply));
 }
 
@@ -168,16 +190,82 @@ function setPlan(id, plan, days) {
 
 function loadUsers(append) {
   if (!append) S.off = 0;
-  var qs = "?limit=50&offset=" + S.off + "&plan=" + encodeURIComponent(S.f) + (S.q ? "&q=" + encodeURIComponent(S.q) : "");
+  var qs = "?limit=50&offset=" + S.off + "&plan=" + encodeURIComponent(S.f) + "&sort=" + S.sort + (S.q ? "&q=" + encodeURIComponent(S.q) : "");
   return call("/api/admin/users" + qs).then(function (j) {
     S.users = append ? S.users.concat(j.users) : j.users; S.more = j.more; S.stats = j.stats;
   });
 }
 function refreshAll() {
-  Promise.all([loadUsers(false), call("/api/admin/requests").then(function (j) { S.reqs = j.requests; })])
+  Promise.all([loadUsers(false), call("/api/admin/requests").then(function (j) { S.reqs = j.requests; }), loadAn()])
     .then(draw).catch(function (e) { flash(e.msg); });
 }
 
+function loadAn() { return call("/api/admin/analytics?days=30").then(function (j) { S.an = j; }).catch(function () { S.an = null; }); }
+function bars(title, rows, label) {
+  var max = Math.max.apply(null, rows.map(function (r) { return r.n; }).concat([1]));
+  return el("div", { class: "card" }, el("h3", null, title), rows.length ? null : el("div", { class: "empty" }, "-"),
+    rows.map(function (r) { return el("div", { class: "bar" }, el("span", null, label(r)), el("em", null, el("i", { style: "width:" + Math.round(r.n / max * 100) + "%" })), el("b", null, r.n)); }));
+}
+function drawDash(app) {
+  var a = S.an;
+  if (!a) return app.append(el("div", { class: "card empty" }, "Statistik belum tersedia. Pastikan worker versi terbaru sudah di-deploy."));
+  var T = a.totals, st = function (n, l) { return el("div", { class: "stat" }, el("b", null, n), el("span", null, l)); };
+  app.append(el("div", { class: "stats" }, st(T.users, "Total pengguna"), st(T.dau, "Aktif hari ini"), st(T.wau, "Aktif 7 hari"), st(T.mau, "Aktif 30 hari")),
+    el("div", { class: "stats" }, st(T.new1, "Baru 24 jam"), st(T.new7, "Baru 7 hari"), st(T.new30, "Baru 30 hari"), st(T.opens30, "Buka app (30 hari)")));
+  var max = Math.max.apply(null, a.daily.map(function (d) { return Math.max(d.active, d.new); }).concat([1]));
+  var chart = el("div", { class: "chart" }, a.daily.map(function (d) {
+    return el("div", { title: d.day + " · aktif " + d.active + " · baru " + d.new + " · buka " + d.opens },
+      el("i", { class: "n", style: "height:" + Math.round(d.new / max * 100) + "px" }), el("i", { style: "height:" + Math.round(d.active / max * 100) + "px" }));
+  }));
+  app.append(el("div", { class: "card" }, el("h3", null, "Pengguna aktif & baru per hari (30 hari, waktu Jepang)"), chart,
+    el("div", { class: "axis" }, el("span", null, a.daily[0].day.slice(5)), el("span", null, a.daily[a.daily.length - 1].day.slice(5))),
+    el("div", { class: "legend" }, el("b", { style: "background:var(--navy)" }), "Aktif", el("b", { style: "background:var(--amber)" }), "Baru daftar")));
+  app.append(el("div", { class: "two" },
+    bars("Bahasa", a.langs.map(function (r) { return { n: r.n, k: r.lang }; }), function (r) { return LANGN[r.k] || r.k; }),
+    bars("Paket", a.plans.map(function (r) { return { n: r.n, k: r.p }; }), function (r) { return LABEL[r.k] || r.k; }),
+    bars("Perangkat terakhir", a.platforms.map(function (r) { return { n: r.n, k: r.k }; }), function (r) { return r.k; })));
+}
+function loadJobs() {
+  return Promise.all([call("/api/admin/jobs?status=" + S.jobSt).then(function (j) { S.jobs = j.jobs; }), call("/api/admin/jobs/sources").then(function (j) { S.srcs = j.sources; })]);
+}
+function jobRow(j) {
+  var pub = el("button", { class: "ok" }, "Terbitkan"), rej = el("button", { class: "ghost" }, "Tolak"), hide = el("button", { class: "ghost" }, "Sembunyikan");
+  function decide(st, b) { b.disabled = true; call("/api/admin/jobs/decide", "POST", { id: j.id, status: st }).then(function () { flash("Lowongan diperbarui.", true); return loadJobs(); }).then(draw).catch(function (e) { b.disabled = false; flash(e.msg); }); }
+  pub.addEventListener("click", function () { decide("published", pub); });
+  rej.addEventListener("click", function () { decide("rejected", rej); });
+  hide.addEventListener("click", function () { decide("hidden", hide); });
+  return el("div", { class: "item" }, el("div", { class: "name" }, j.title), el("div", { class: "mail" }, [j.company, j.prefecture, j.field, j.visa, j.salary].filter(Boolean).join(" · ")),
+    el("div", { class: "meta" }, el("span", { class: "badge" }, j.source), j.by ? "dikirim " + j.by + " · " : "", fmtTime(j.ts), j.reports ? " · " + j.reports + " laporan" : ""),
+    j.contact ? el("div", { class: "act" }, "Kontak: " + j.contact) : null, j.raw ? el("div", { class: "raw" }, j.raw) : null,
+    el("div", { class: "row" }, S.jobSt === "published" ? hide : pub, S.jobSt === "pending" ? rej : null));
+}
+function drawJobs(card) {
+  var f = el("select", null, el("option", { value: "pending" }, "Menunggu review"), el("option", { value: "published" }, "Tampil"), el("option", { value: "hidden" }, "Disembunyikan"), el("option", { value: "rejected" }, "Ditolak"));
+  f.value = S.jobSt; f.addEventListener("change", function () { S.jobSt = f.value; loadJobs().then(draw).catch(function (e) { flash(e.msg); }); });
+  card.append(el("div", { class: "row" }, f));
+  if (!S.jobs.length) card.append(el("div", { class: "empty" }, "Tidak ada lowongan di sini."));
+  S.jobs.forEach(function (j) { card.append(jobRow(j)); });
+  var name = el("input", { class: "grow", placeholder: "Nama situs" }), url = el("input", { class: "grow", placeholder: "https://…/feed.xml", spellcheck: "false" }),
+    kind = el("select", null, el("option", { value: "rss" }, "RSS/Atom"), el("option", { value: "json" }, "JSON Feed")),
+    tr = el("label", { style: "display:flex;align-items:center;gap:6px;margin:0" }, el("input", { type: "checkbox", id: "trusted" }), "Langsung tampil (terpercaya)"),
+    add = el("button", null, "Simpan sumber"), pull = el("button", { class: "ghost" }, "Tarik sekarang");
+  add.addEventListener("click", function () {
+    call("/api/admin/jobs/sources", "POST", { name: name.value.trim(), url: url.value.trim(), kind: kind.value, trusted: $("#trusted").checked }).then(function () { flash("Sumber disimpan.", true); return loadJobs(); }).then(draw).catch(function (e) { flash(e.msg); });
+  });
+  pull.addEventListener("click", function () {
+    pull.disabled = true; call("/api/admin/jobs/ingest", "POST", {}).then(function (j) { flash("Ditarik: " + j.added + " baru, " + j.dup + " duplikat, " + j.errors + " error.", !j.errors); return loadJobs(); }).then(draw).catch(function (e) { pull.disabled = false; flash(e.msg); });
+  });
+  var src = el("div", { class: "card", style: "margin-top:12px" }, el("h3", null, "Sumber feed (ditarik otomatis tiap Senin 03:17 JST)"));
+  if (!S.srcs.length) src.append(el("div", { class: "empty" }, "Belum ada sumber feed."));
+  S.srcs.forEach(function (x) {
+    var del = el("button", { class: "ghost" }, "Hapus");
+    del.addEventListener("click", function () { if (confirm("Hapus sumber " + x.name + "?")) call("/api/admin/jobs/sources", "POST", { delete: true, id: x.id }).then(loadJobs).then(draw).catch(function (e) { flash(e.msg); }); });
+    src.append(el("div", { class: "item" }, el("div", { class: "name" }, x.name, x.trusted ? " ✓" : ""), el("div", { class: "mail" }, x.url),
+      el("div", { class: "act" }, x.last_run ? "Terakhir " + fmtTime(x.last_run) + " · " + (x.last_status || "") : "Belum pernah ditarik"), el("div", { class: "row" }, del)));
+  });
+  src.append(el("div", { class: "row", style: "margin-top:10px" }, name, url, kind), el("div", { class: "row", style: "margin-top:8px" }, tr, add, pull));
+  card.append(src);
+}
 function loadMat() {
   return call("/api/admin/study?prefix=" + encodeURIComponent(S.matPre)).then(function (j) { S.mat = j.items; });
 }
@@ -201,17 +289,17 @@ function draw() {
   var app = $("#app"), keep = $("#flash"); app.textContent = ""; if (keep) app.append(keep);
   $("#out").style.display = "";
   var st = S.stats || { total: 0, premium: 0, plus: 0, pending: 0 };
-  app.append(el("div", { class: "stats" },
+  var tab = function (id, label, onopen) { var b = el("button", { class: S.tab === id ? "on" : "" }, label); b.addEventListener("click", function () { S.tab = id; if (onopen) onopen().then(draw).catch(function (e) { flash(e.msg); }); else draw(); }); return b; };
+  app.append(el("div", { class: "tabs", style: "flex-wrap:wrap" }, tab("dash", "Statistik", loadAn), tab("req", "Permintaan (" + S.reqs.length + ")"), tab("usr", "Pengguna (" + st.total + ")"), tab("job", "Lowongan", loadJobs), tab("mat", "Materi", loadMat)));
+  if (S.tab === "dash") { drawDash(app); app.append(el("button", { class: "ghost", onclick: refreshAll }, "Segarkan")); return; }
+  if (S.tab === "req" || S.tab === "usr") app.append(el("div", { class: "stats" },
     el("div", { class: "stat" }, el("b", null, st.total), el("span", null, "Pengguna")),
     el("div", { class: "stat" }, el("b", null, st.premium), el("span", null, "Premium aktif")),
     el("div", { class: "stat" }, el("b", null, st.plus), el("span", null, "Premium+ aktif")),
     el("div", { class: "stat" }, el("b", null, st.pending), el("span", null, "Menunggu"))));
-  var t1 = el("button", { class: S.tab === "req" ? "on" : "" }, "Permintaan (" + S.reqs.length + ")"), t2 = el("button", { class: S.tab === "usr" ? "on" : "" }, "Pengguna"), t3 = el("button", { class: S.tab === "mat" ? "on" : "" }, "Materi");
-  t1.addEventListener("click", function () { S.tab = "req"; draw(); }); t2.addEventListener("click", function () { S.tab = "usr"; draw(); });
-  t3.addEventListener("click", function () { S.tab = "mat"; loadMat().then(draw).catch(function (e) { flash(e.msg); }); });
-  app.append(el("div", { class: "tabs" }, t1, t2, t3));
   var card = el("div", { class: "card" });
-  if (S.tab === "req") {
+  if (S.tab === "job") drawJobs(card);
+  else if (S.tab === "req") {
     if (!S.reqs.length) card.append(el("div", { class: "empty" }, "Belum ada permintaan upgrade."));
     S.reqs.forEach(function (r) { card.append(reqRow(r)); });
   } else if (S.tab === "mat") {
@@ -232,11 +320,14 @@ function draw() {
   } else {
     var q = el("input", { class: "grow", placeholder: "Cari nama atau email", value: S.q }), f = el("select", null,
       el("option", { value: "all" }, "Semua"), el("option", { value: "premium" }, "Premium"), el("option", { value: "plus" }, "Premium+"),
-      el("option", { value: "expiring" }, "Segera habis (7 hari)"), el("option", { value: "pending" }, "Menunggu persetujuan"), el("option", { value: "free" }, "Gratis"));
+      el("option", { value: "expiring" }, "Segera habis (7 hari)"), el("option", { value: "pending" }, "Menunggu persetujuan"), el("option", { value: "free" }, "Gratis"),
+      el("option", { value: "active7" }, "Aktif 7 hari terakhir"), el("option", { value: "dormant30" }, "Tidak aktif > 30 hari"));
     f.value = S.f;
+    var so = el("select", null, el("option", { value: "created" }, "Urut: terbaru daftar"), el("option", { value: "active" }, "Urut: terakhir aktif"));
+    so.value = S.sort; so.addEventListener("change", function () { S.sort = so.value; loadUsers(false).then(draw).catch(function (e) { flash(e.msg); }); });
     q.addEventListener("input", function () { clearTimeout(tmr); tmr = setTimeout(function () { S.q = q.value.trim(); loadUsers(false).then(function () { draw(); var n = $(".grow"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }).catch(function (e) { flash(e.msg); }); }, 350); });
     f.addEventListener("change", function () { S.f = f.value; loadUsers(false).then(draw).catch(function (e) { flash(e.msg); }); });
-    card.append(el("div", { class: "row" }, q, f));
+    card.append(el("div", { class: "row" }, q, f, so));
     if (!S.users.length) card.append(el("div", { class: "empty" }, "Tidak ada pengguna."));
     S.users.forEach(function (u) { card.append(userRow(u)); });
     if (S.more) { var m = el("button", { class: "ghost", style: "margin-top:10px" }, "Muat lagi"); m.addEventListener("click", function () { S.off += 50; loadUsers(true).then(draw).catch(function (e) { flash(e.msg); }); }); card.append(m); }
