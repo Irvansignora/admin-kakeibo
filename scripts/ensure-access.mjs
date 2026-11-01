@@ -22,19 +22,13 @@ const app = {
 };
 
 try {
-  // metode login: kode sekali pakai ke email (One-time PIN). Dibuat kalau belum ada, lalu jadi satu-satunya cara login admin.
-  const idps = await cf("GET", "/access/identity_providers?per_page=100");
-  let otp = idps.find((x) => x.type === "onetimepin");
-  if (!otp) {
-    try { otp = await cf("POST", "/access/identity_providers", { name: "Kode email (One-time PIN)", type: "onetimepin", config: {} }); console.log("One-time PIN diaktifkan"); }
-    catch (e) {
-      console.log("::error::Login One-time PIN belum aktif dan token tidak boleh mengaktifkannya. Aktifkan sekali di dashboard: " +
-        "Zero Trust → Integrations/Settings → Identity providers (Authentication → Login methods) → Add new → One-time PIN, lalu jalankan ulang workflow ini.");
-      process.exit(1);
-    }
-  }
-  app.allowed_idps = [otp.id];
-  app.auto_redirect_to_identity = true; // langsung ke form email, tanpa pilihan "Cloudflare"
+  // metode login: kode sekali pakai ke email (One-time PIN). Kalau token boleh membaca daftar metode login dan OTP ada,
+  // jadikan satu-satunya cara login (langsung ke form email). Kalau tidak bisa dibaca, biarkan semua metode yang aktif —
+  // aturan tetap hanya mengizinkan email di ADMIN_EMAILS.
+  const idps = await cf("GET", "/access/identity_providers?per_page=100").catch(() => []);
+  const otp = (idps || []).find((x) => x.type === "onetimepin");
+  if (otp) { app.allowed_idps = [otp.id]; app.auto_redirect_to_identity = true; }
+  else console.log("Daftar metode login tidak terbaca; semua metode aktif diizinkan (aktifkan One-time PIN di Zero Trust untuk login kode email).");
   const apps = await cf("GET", "/access/apps?per_page=100");
   const found = apps.find((a) => a.domain === DOMAIN || (a.self_hosted_domains || []).includes(DOMAIN));
   if (found) {
