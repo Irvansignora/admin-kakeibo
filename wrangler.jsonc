@@ -1,0 +1,10 @@
+{
+  // Panel admin Kakeibo (statis) di Cloudflare Workers, dilindungi Cloudflare Access (lihat scripts/ensure-access.mjs).
+  "$schema": "https://unpkg.com/wrangler@4/config-schema.json",
+  "name": "kakeibo-admin",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "admin.iranza.com", "custom_domain": true }],
+  "assets": { "directory": "./public", "html_handling": "auto-trailing-slash", "not_found_handling": "none" }
+}

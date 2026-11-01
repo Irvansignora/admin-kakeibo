@@ -1,0 +1,43 @@
+name: Deploy admin ke Cloudflare
+
+# Push ke main → pasang Cloudflare Access (hanya email pemilik) lalu deploy panel admin ke admin.iranza.com.
+# Secrets repo: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID (sama dengan repo apps-money-management).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-admin
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ADMIN_DOMAIN: admin.iranza.com
+      ADMIN_EMAILS: irvansignora@gmail.com
+    steps:
+      - name: Cek secrets
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Isi secrets CLOUDFLARE_API_TOKEN dan CLOUDFLARE_ACCOUNT_ID di Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Pasang Cloudflare Access (hanya pemilik)
+        run: node scripts/ensure-access.mjs
+      - name: Deploy panel admin
+        run: npx --yes wrangler@4 deploy
+      - name: Cek admin terkunci Access
+        run: |
+          sleep 10
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" https://$ADMIN_DOMAIN/)
+          LOC=$(curl -s -o /dev/null -w "%{redirect_url}" https://$ADMIN_DOMAIN/)
+          echo "https://$ADMIN_DOMAIN → $CODE $LOC"
+          echo "$LOC" | grep -q "cloudflareaccess.com" || { echo "::error::admin.iranza.com belum terkunci Cloudflare Access"; exit 1; }
