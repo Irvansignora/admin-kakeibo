@@ -25,7 +25,14 @@ try {
   // metode login: kode sekali pakai ke email (One-time PIN). Dibuat kalau belum ada, lalu jadi satu-satunya cara login admin.
   const idps = await cf("GET", "/access/identity_providers?per_page=100");
   let otp = idps.find((x) => x.type === "onetimepin");
-  if (!otp) { otp = await cf("POST", "/access/identity_providers", { name: "Kode email (One-time PIN)", type: "onetimepin", config: {} }); console.log("One-time PIN diaktifkan"); }
+  if (!otp) {
+    try { otp = await cf("POST", "/access/identity_providers", { name: "Kode email (One-time PIN)", type: "onetimepin", config: {} }); console.log("One-time PIN diaktifkan"); }
+    catch (e) {
+      console.log("::error::Login One-time PIN belum aktif dan token tidak boleh mengaktifkannya. Aktifkan sekali di dashboard: " +
+        "Zero Trust → Integrations/Settings → Identity providers (Authentication → Login methods) → Add new → One-time PIN, lalu jalankan ulang workflow ini.");
+      process.exit(1);
+    }
+  }
   app.allowed_idps = [otp.id];
   app.auto_redirect_to_identity = true; // langsung ke form email, tanpa pilihan "Cloudflare"
   const apps = await cf("GET", "/access/apps?per_page=100");
