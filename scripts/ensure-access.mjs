@@ -18,10 +18,16 @@ const cf = async (method, path, body) => {
 const policy = { name: "Hanya pemilik Kakeibo", decision: "allow", include: EMAILS.map((email) => ({ email: { email } })), precedence: 1 };
 const app = {
   name: "Kakeibo Admin", domain: DOMAIN, type: "self_hosted", session_duration: "24h",
-  app_launcher_visible: false, auto_redirect_to_identity: false, policies: [policy]
+  app_launcher_visible: false, policies: [policy]
 };
 
 try {
+  // metode login: kode sekali pakai ke email (One-time PIN). Dibuat kalau belum ada, lalu jadi satu-satunya cara login admin.
+  const idps = await cf("GET", "/access/identity_providers?per_page=100");
+  let otp = idps.find((x) => x.type === "onetimepin");
+  if (!otp) { otp = await cf("POST", "/access/identity_providers", { name: "Kode email (One-time PIN)", type: "onetimepin", config: {} }); console.log("One-time PIN diaktifkan"); }
+  app.allowed_idps = [otp.id];
+  app.auto_redirect_to_identity = true; // langsung ke form email, tanpa pilihan "Cloudflare"
   const apps = await cf("GET", "/access/apps?per_page=100");
   const found = apps.find((a) => a.domain === DOMAIN || (a.self_hosted_domains || []).includes(DOMAIN));
   if (found) {
